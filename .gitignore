@@ -1,0 +1,30 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+node_modules/
+.env
+*.log
+
+# Dataset
+data/raw/
+data/processed/
+
+# Large model checkpoints
+checkpoints/
+
+# Generated evaluation results
+results/
+
+# Large metadata/archive files
+metadata/dfdc-video-audio-labels.zip
+
+# Generated project listings
+all_video_paths.txt
+matched_5197.csv
+project_files.txt
+project_structure.txt
+project_structure_small.txt
+data/inference/
