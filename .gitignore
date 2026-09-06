@@ -28,3 +28,10 @@ project_files.txt
 project_structure.txt
 project_structure_small.txt
 data/inference/
+
+# Local database and runtime logs
+data/db/
+data/logs/
+
+# Python cache
+db/__pycache__/
