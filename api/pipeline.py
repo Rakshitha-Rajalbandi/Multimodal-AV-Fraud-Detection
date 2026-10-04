@@ -29,6 +29,21 @@ from models.gradcam import GradCAM, overlay_heatmap_on_image
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Checkpoint paths
+# IMAGE_CHECKPOINT — EfficientNet-B0 image deepfake / AI-generation classifier.
+#
+# Current checkpoint  : efficientnet_b0_image_best.pth
+#   Trained on FaceAVCeleb face-swap frames (~63% val acc).
+#   May misclassify AI-generated portraits (diffusion / GAN) as REAL.
+#
+# Improved checkpoint : efficientnet_b0_cifake_best.pth
+#   Trained on CIFAKE (120k images, Stable Diffusion vs CIFAR-10 real photos).
+#   Expected val acc ~85-92%; significantly better for AI-generated portraits.
+#
+# To switch to the CIFAKE-trained checkpoint after retraining:
+#   1. Run: python train/train_cifake.py   (see train/CIFAKE_RETRAINING.md)
+#   2. Change the line below to:
+#        IMAGE_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "image_deepfake" / "efficientnet_b0_cifake_best.pth"
+#   3. Restart the API server.
 IMAGE_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "image_deepfake" / "efficientnet_b0_image_best.pth"
 VIDEO_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "video_deepfake" / "efficientnet_b0_best.pth"
 AUDIO_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "audio_deepfake_best.pth"
