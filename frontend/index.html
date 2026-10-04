@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Multimodal Audio-Video Fraud & Deepfake Detection Platform</title>
+  <title> | Multimodal AI Verification</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React & ReactDOM -->
@@ -12,19 +12,45 @@
   <!-- Babel Compiler -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-    body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #f8fafc; }
-    .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
-    .gradient-text { background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .pulse-glow { animation: pulse-glow-anim 2s infinite alternate; }
-    @keyframes pulse-glow-anim { 0% { box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); } 100% { box-shadow: 0 0 35px rgba(239, 68, 68, 0.8); } }
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+    
+    body { 
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif; 
+      background-color: #f8fafc; 
+      color: #0f172a; 
+    }
+
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    .white-card { 
+      background: #ffffff; 
+      border: 1px solid #e2e8f0; 
+      border-radius: 16px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    }
+
+    .btn-blue {
+      background-color: #2563eb;
+      color: #ffffff;
+      transition: all 0.2s ease;
+    }
+    .btn-blue:hover {
+      background-color: #1d4ed8;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+
+    .blue-gradient-text {
+      background: linear-gradient(135deg, #1e40af 0%, #2563eb 50%, #3b82f6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
   </style>
 </head>
-<body class="min-h-screen">
-  <div id="root"></div>
+<body class="min-h-screen flex flex-col">
+  <div id="root" class="flex-1 flex flex-col"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     function App() {
       // Auth State
@@ -37,21 +63,41 @@
       const [loginError, setLoginError] = useState(null);
       const [loginLoading, setLoginLoading] = useState(false);
 
-      // App Workspace State
+      // Workspace State
       const [activeTab, setActiveTab] = useState('analysis'); // 'analysis' | 'history'
+      const [inputMode, setInputMode] = useState('video'); // 'video' | 'image' | 'url' | 'webcam'
+      
       const [uploadedFile, setUploadedFile] = useState(null);
-      const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
+      const [mediaPreviewUrl, setMediaPreviewUrl] = useState(null);
+      const [mediaUrlInput, setMediaUrlInput] = useState('');
+      
+      // Live Webcam Stream State
+      const [isWebcamActive, setIsWebcamActive] = useState(false);
+      const [webcamError, setWebcamError] = useState(null);
+      const [streamTimeline, setStreamTimeline] = useState([]);
+      const [liveFaceBox, setLiveFaceBox] = useState(null);
+      const [liveHeatmapUri, setLiveHeatmapUri] = useState(null);
+      const videoRef = useRef(null);
+      const canvasRef = useRef(null);
+      const streamIntervalRef = useRef(null);
+
+      // Interactive Sensitivity Controls
+      const [visualWeight, setVisualWeight] = useState(50);
+      const [audioWeight, setAudioWeight] = useState(30);
+      const [anomalyThreshold, setAnomalyThreshold] = useState(45);
+
       const [loading, setLoading] = useState(false);
       const [analysisResult, setAnalysisResult] = useState(null);
       const [currentRequestId, setCurrentRequestId] = useState(null);
       const [currentFilename, setCurrentFilename] = useState(null);
       const [error, setError] = useState(null);
       const [analystDecision, setAnalystDecision] = useState(null);
+      const [activeHoverPoint, setActiveHoverPoint] = useState(null);
 
-      // History & Audit Records State
+      // History State
       const [historyRecords, setHistoryRecords] = useState([]);
       const [historyDbEngine, setHistoryDbEngine] = useState('MYSQL');
-      const [historyFilter, setHistoryFilter] = useState('ALL'); // 'ALL' | 'APPROVED' | 'AUDIT' | 'REJECTED'
+      const [historyFilter, setHistoryFilter] = useState('ALL');
       const [searchQuery, setSearchQuery] = useState('');
 
       const fetchHistory = () => {
@@ -63,13 +109,11 @@
               setHistoryDbEngine(data.database_engine || 'MYSQL');
             }
           })
-          .catch(err => console.log('Audit trail fetch notice', err));
+          .catch(err => console.log('Audit trail notice', err));
       };
 
       useEffect(() => {
-        if (user) {
-          fetchHistory();
-        }
+        if (user) fetchHistory();
       }, [user]);
 
       const handleLogin = async (e) => {
@@ -97,15 +141,146 @@
       };
 
       const handleLogout = () => {
+        stopWebcamStream();
         setUser(null);
         sessionStorage.removeItem('forensic_user');
       };
+
+      const stopWebcamStream = () => {
+        if (streamIntervalRef.current) {
+          clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = null;
+        }
+        if (videoRef.current && videoRef.current.srcObject) {
+          const tracks = videoRef.current.srcObject.getTracks();
+          tracks.forEach(track => track.stop());
+          videoRef.current.srcObject = null;
+        }
+        setIsWebcamActive(false);
+      };
+
+      const startWebcamStream = async () => {
+        setWebcamError(null);
+        setError(null);
+        setStreamTimeline([]);
+        setLiveFaceBox(null);
+        setLiveHeatmapUri(null);
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
+            audio: false
+          });
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.play();
+          }
+
+          setIsWebcamActive(true);
+          streamIntervalRef.current = setInterval(captureAndAnalyzeWebcamFrame, 900);
+        } catch (err) {
+          console.error("Webcam access error:", err);
+          setWebcamError("Could not access camera device. Please ensure camera permission is granted.");
+        }
+      };
+
+      const captureAndAnalyzeWebcamFrame = async () => {
+        if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) return;
+
+        try {
+          const v = videoRef.current;
+          const canvas = canvasRef.current || document.createElement('canvas');
+          canvas.width = 320;
+          canvas.height = 240;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+
+          const b64Data = canvas.toDataURL('image/jpeg', 0.65);
+
+          const response = await fetch('/predict_stream_frame', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: b64Data })
+          });
+
+          if (!response.ok) return;
+
+          const data = await response.json();
+          if (data.status === 'success') {
+            setLiveFaceBox(data.bounding_box);
+            if (data.heatmap_data_uri) setLiveHeatmapUri(data.heatmap_data_uri);
+
+            const nowStr = new Date().toLocaleTimeString().split(' ')[0];
+            const point = {
+              timestamp_sec: Date.now() / 1000,
+              timestamp_str: nowStr,
+              risk_percent: data.fraud_risk_percent,
+              prediction: data.prediction
+            };
+
+            setStreamTimeline(prev => {
+              const updated = [...prev.slice(-19), point];
+              
+              setAnalysisResult({
+                media_type: "Live Webcam Stream",
+                fraud_risk_score: data.fake_probability,
+                fraud_risk_percent: data.fraud_risk_percent,
+                prediction: data.prediction,
+                risk_level: data.risk_level,
+                confidence: "HIGH",
+                trigger_modality: data.prediction === 'FAKE' ? 'LIVE VISUAL FACIAL ANOMALY' : 'AUTHENTIC LIVE STREAM',
+                ai_explanation: data.ai_explanation,
+                video: {
+                  prediction: data.prediction,
+                  fake_probability: data.fake_probability,
+                  real_probability: data.real_probability,
+                  visual_score_percent: data.fraud_risk_percent,
+                  frames_evaluated: 1,
+                  heatmaps: data.heatmap_data_uri ? [{
+                    data_uri: data.heatmap_data_uri,
+                    label: "Live Grad-CAM Activation",
+                    fake_prob: data.fake_probability
+                  }] : []
+                },
+                audio: { prediction: "LIVE STREAM", fake_probability: 0.0, audio_score_percent: 0.0 },
+                sync: { sync_mismatch_score: 0.0 },
+                fusion: { fraud_risk_percent: data.fraud_risk_percent, prediction: data.prediction },
+                heatmaps: data.heatmap_data_uri ? [{
+                  data_uri: data.heatmap_data_uri,
+                  label: "Live Grad-CAM Heatmap",
+                  fake_prob: data.fake_probability
+                }] : [],
+                timeline_risk: updated,
+                suspicious_timestamps: data.prediction === 'FAKE' ? [{
+                  timestamp_str: `Live (${nowStr})`,
+                  risk_percent: data.fraud_risk_percent,
+                  description: "Real-time facial manipulation / landmark drift detected"
+                }] : []
+              });
+
+              return updated;
+            });
+
+            if (!currentRequestId) {
+              setCurrentRequestId(`stream_${Date.now().toString(36)}`);
+              setCurrentFilename("Live_Webcam_Stream.mp4");
+            }
+          }
+        } catch (err) {
+          console.log("Webcam frame capture note:", err);
+        }
+      };
+
+      useEffect(() => {
+        return () => stopWebcamStream();
+      }, []);
 
       const handleFileChange = (e) => {
         if (e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
           setUploadedFile(file);
-          setVideoPreviewUrl(URL.createObjectURL(file));
+          setMediaPreviewUrl(URL.createObjectURL(file));
           setAnalysisResult(null);
           setCurrentRequestId(null);
           setCurrentFilename(null);
@@ -115,20 +290,26 @@
       };
 
       const executeAnalysis = async () => {
-        if (!uploadedFile) {
-          setError("Please select or drop a video file to analyze.");
-          return;
-        }
-
         setLoading(true);
         setError(null);
         setAnalysisResult(null);
         setAnalystDecision(null);
 
         try {
-          const formData = new FormData();
-          formData.append('video', uploadedFile);
-          const response = await fetch('/predict', { method: 'POST', body: formData });
+          let response;
+          if (inputMode === 'url') {
+            if (!mediaUrlInput.trim()) throw new Error("Please enter a valid media URL link.");
+            response = await fetch('/predict_url', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: mediaUrlInput.trim() })
+            });
+          } else {
+            if (!uploadedFile) throw new Error("Please select or drop a media file to analyze.");
+            const formData = new FormData();
+            formData.append('video', uploadedFile);
+            response = await fetch('/predict', { method: 'POST', body: formData });
+          }
 
           if (!response.ok) {
             const errData = await response.json();
@@ -167,22 +348,22 @@
         }
       };
 
+      const downloadPdfReport = () => {
+        if (!currentRequestId) return;
+        window.open(`/api/download_report/${currentRequestId}`, '_blank');
+      };
+
       // Filtered records for History view
       const filteredRecords = historyRecords.filter(rec => {
         const dec = (rec.analyst_decision || rec.decision || '').toUpperCase();
         const fname = (rec.filename || '').toLowerCase();
         const reqId = (rec.request_id || '').toLowerCase();
         const q = searchQuery.toLowerCase();
-
         const matchesSearch = fname.includes(q) || reqId.includes(q);
 
-        if (historyFilter === 'APPROVED') {
-          return matchesSearch && dec.includes('APPROV');
-        } else if (historyFilter === 'AUDIT') {
-          return matchesSearch && (dec.includes('AUDIT') || dec.includes('FLAG'));
-        } else if (historyFilter === 'REJECTED') {
-          return matchesSearch && dec.includes('REJECT');
-        }
+        if (historyFilter === 'APPROVED') return matchesSearch && dec.includes('APPROV');
+        if (historyFilter === 'AUDIT') return matchesSearch && (dec.includes('AUDIT') || dec.includes('FLAG'));
+        if (historyFilter === 'REJECTED') return matchesSearch && dec.includes('REJECT');
         return matchesSearch;
       });
 
@@ -190,46 +371,46 @@
       const auditCount = historyRecords.filter(r => (r.analyst_decision || r.decision || '').toUpperCase().includes('AUDIT') || (r.analyst_decision || r.decision || '').toUpperCase().includes('FLAG')).length;
       const rejectedCount = historyRecords.filter(r => (r.analyst_decision || r.decision || '').toUpperCase().includes('REJECT')).length;
 
-      // Render Login Screen if not authenticated
+      // Render Login Screen
       if (!user) {
         return (
-          <div class="min-h-screen flex items-center justify-center px-4 py-12">
-            <div class="glass-card rounded-3xl p-8 md:p-10 max-w-md w-full space-y-6 shadow-2xl border border-slate-700/60">
-              
+          <div class="min-h-screen flex items-center justify-center p-4 bg-slate-100">
+            <div class="white-card p-8 md:p-10 max-w-md w-full space-y-6">
               <div class="text-center space-y-2">
-                <div class="w-16 h-16 rounded-2xl bg-indigo-500/20 text-indigo-400 mx-auto flex items-center justify-center border border-indigo-500/30">
-                  <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                <div class="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 mx-auto flex items-center justify-center border border-blue-200">
+                  <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
                 </div>
-                <h1 class="text-2xl font-black gradient-text mt-3">Forensic Security Portal</h1>
+                <h1 class="text-2xl font-bold blue-gradient-text mt-3">Deepfake Forensics Studio</h1>
+                <p class="text-xs text-slate-500 font-medium">Multimodal Audio Video Fraud Detection Platform</p>
               </div>
 
-              <form onSubmit={handleLogin} class="space-y-4">
+              <form onSubmit={handleLogin} class="space-y-4 pt-2">
                 <div>
-                  <label class="text-xs font-bold text-slate-300 block mb-1 uppercase tracking-wider">Username</label>
+                  <label class="text-xs font-bold text-slate-700 block mb-1.5 uppercase tracking-wider">Username</label>
                   <input 
                     type="text" 
                     value={loginUsername}
                     onChange={(e) => setLoginUsername(e.target.value)}
                     required
-                    class="w-full px-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 transition"
+                    class="w-full px-4 py-3 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-600 transition shadow-sm"
                     placeholder="e.g. analyst or admin"
                   />
                 </div>
 
                 <div>
-                  <label class="text-xs font-bold text-slate-300 block mb-1 uppercase tracking-wider">Password</label>
+                  <label class="text-xs font-bold text-slate-700 block mb-1.5 uppercase tracking-wider">Password</label>
                   <input 
                     type="password" 
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                     required
-                    class="w-full px-4 py-3 bg-slate-900/90 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:border-indigo-500 transition"
-                    placeholder="Enter password"
+                    class="w-full px-4 py-3 bg-white border border-slate-300 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-blue-600 transition shadow-sm"
+                    placeholder="••••••••••••"
                   />
                 </div>
 
                 {loginError && (
-                  <div class="p-3 bg-rose-500/15 border border-rose-500/30 rounded-xl text-rose-400 text-xs font-semibold text-center">
+                  <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-xs font-semibold text-center">
                     {loginError}
                   </div>
                 )}
@@ -237,7 +418,7 @@
                 <button
                   type="submit"
                   disabled={loginLoading}
-                  class="w-full py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg transition flex items-center justify-center gap-2 text-sm"
+                  class="w-full py-3.5 btn-blue font-bold rounded-xl text-sm shadow-md"
                 >
                   {loginLoading ? 'Authenticating...' : 'Sign In to Portal'}
                 </button>
@@ -249,439 +430,825 @@
       }
 
       return (
-        <div class="max-w-7xl mx-auto px-4 py-8 space-y-8">
+        <div class="flex-1 flex flex-col">
           
-          {/* Main Top Header */}
-          <header class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
-            <div>
+          {/* Top Header */}
+          <header class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+              
               <div class="flex items-center gap-3">
-                <span class="px-3 py-1 bg-indigo-500/20 text-indigo-400 text-xs font-bold rounded-full uppercase tracking-wider border border-indigo-500/30">
-                  AI Forensic Security & Identity Verification
-                </span>
-                <span class="flex items-center gap-1 text-xs text-emerald-400 font-medium">
-                  <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span> MySQL DB Active ({historyDbEngine})
-                </span>
-              </div>
-              <h1 class="text-3xl font-extrabold tracking-tight mt-2 gradient-text">
-                Multimodal Audio-Video Fraud & Deepfake Detection Platform
-              </h1>
-            </div>
-
-            <div class="flex items-center gap-3">
-              <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 border border-slate-700 rounded-xl text-xs">
-                <div class="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white uppercase text-xs">
-                  {user.username.charAt(0)}
+                <div class="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md">
+                  <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
                 </div>
-                <div class="text-left">
-                  <span class="font-bold text-slate-200 block">{user.username}</span>
-                  <span class="text-[10px] text-slate-400 block">{user.role}</span>
+                <div>
+                  <span class="font-extrabold text-base text-slate-900 block leading-none">Multimodal Audio Video Fraud and Deepfake Detection</span>
+                  
                 </div>
               </div>
 
-              <button 
-                onClick={handleLogout}
-                class="px-3 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-semibold rounded-xl border border-rose-500/30 transition"
-              >
-                Sign Out
-              </button>
+              <div class="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                <button
+                  onClick={() => setActiveTab('analysis')}
+                  class={`px-5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${activeTab === 'analysis' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                  Forensic Workspace
+                </button>
+
+                <button
+                  onClick={() => { setActiveTab('history'); fetchHistory(); }}
+                  class={`px-5 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${activeTab === 'history' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                  Audit History ({historyRecords.length})
+                </button>
+              </div>
+
+              <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                  <span class="font-bold text-slate-800">{user.username}</span>
+                </div>
+
+                <button 
+                  onClick={handleLogout}
+                  class="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-300 transition"
+                >
+                  Sign Out
+                </button>
+              </div>
+
             </div>
           </header>
 
-          {/* Navigation Bar / Tabs */}
-          <div class="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div class="flex items-center gap-3">
-              <button
-                onClick={() => setActiveTab('analysis')}
-                class={`px-5 py-2.5 rounded-xl font-bold text-xs tracking-wider uppercase transition flex items-center gap-2 ${activeTab === 'analysis' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                🔍 Live Video Fraud Analysis
-              </button>
+          {/* Main Content */}
+          <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-8 space-y-6">
 
-              <button
-                onClick={() => { setActiveTab('history'); fetchHistory(); }}
-                class={`px-5 py-2.5 rounded-xl font-bold text-xs tracking-wider uppercase transition flex items-center gap-2 ${activeTab === 'history' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-              >
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 01-2-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                📋 Verification Audit History ({historyRecords.length})
-              </button>
-            </div>
-          </div>
-
-          {/* TAB 1: Live Video Analysis Workspace */}
-          {activeTab === 'analysis' && (
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              
-              {/* Left Column: Video Upload Panel */}
-              <div class="lg:col-span-5 space-y-6">
+            {/* TAB 1: Analysis Workspace */}
+            {activeTab === 'analysis' && (
+              <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 
-                <div class="glass-card rounded-2xl p-6 space-y-6">
-                  <div>
-                    <h2 class="text-lg font-bold flex items-center gap-2 text-slate-200">
-                      <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                      Upload Video for Forensic Analysis
-                    </h2>
-                    <p class="text-xs text-slate-400 mt-1">
-                      Upload any video recording (.mp4, .avi, .mov) to evaluate tri-modality deepfake cues.
-                    </p>
-                  </div>
+                {/* Left Column */}
+                <div class="lg:col-span-5 space-y-6">
                   
-                  {/* File Dropzone */}
-                  <label class={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer transition min-h-[220px] ${uploadedFile ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-700 hover:border-indigo-500 hover:bg-slate-800/50'}`}>
-                    <input type="file" accept="video/*" class="hidden" onChange={handleFileChange} />
-                    
-                    {uploadedFile ? (
-                      <div class="flex flex-col items-center space-y-3">
-                        <div class="w-12 h-12 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400">
-                          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                        </div>
-                        <div class="text-center">
-                          <span class="text-sm font-bold text-indigo-300 block">{uploadedFile.name}</span>
-                          <span class="text-xs text-slate-400 mt-0.5 block">{(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB</span>
-                          <span class="text-xs text-emerald-400 font-bold mt-2 inline-block px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/30 rounded-md">
-                            ✓ File Ready for ML Analysis
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div class="flex flex-col items-center text-center space-y-3">
-                        <div class="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
-                          <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-                        </div>
-                        <div>
-                          <span class="text-sm font-semibold text-slate-200 block">Drag and drop video file here</span>
-                          <span class="text-xs text-slate-400 mt-1 block">or click to browse from your computer</span>
-                        </div>
-                        <span class="text-[11px] text-slate-500">Supports .mp4, .avi, .mov, .webm</span>
+                  <div class="white-card p-6 space-y-6">
+                    <div class="border-b border-slate-200 pb-4">
+                      <h2 class="text-base font-extrabold text-slate-900">Upload Evidence Media</h2>
+                      <p class="text-xs text-slate-500 mt-1">Select video recording, static image, or direct media URL.</p>
+                    </div>
+
+                    <div class="grid grid-cols-4 gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+                      <button
+                        onClick={() => { stopWebcamStream(); setInputMode('video'); }}
+                        class={`py-2 rounded-lg text-xs font-bold transition ${inputMode === 'video' ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        🎬 Video
+                      </button>
+
+                      <button
+                        onClick={() => { stopWebcamStream(); setInputMode('image'); }}
+                        class={`py-2 rounded-lg text-xs font-bold transition ${inputMode === 'image' ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        🖼️ Image
+                      </button>
+
+                      <button
+                        onClick={() => { stopWebcamStream(); setInputMode('url'); }}
+                        class={`py-2 rounded-lg text-xs font-bold transition ${inputMode === 'url' ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        🌐 URL
+                      </button>
+
+                      <button
+                        onClick={() => setInputMode('webcam')}
+                        class={`py-2 rounded-lg text-xs font-bold transition ${inputMode === 'webcam' ? 'bg-white text-blue-600 shadow-sm border border-slate-200' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        📹 Webcam
+                      </button>
+                    </div>
+
+                    {/* Mode 1 & 2: File Upload (Video / Image) */}
+                    {(inputMode === 'video' || inputMode === 'image') && (
+                      <label class={`border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer transition min-h-[200px] ${uploadedFile ? 'border-blue-500 bg-blue-50/50' : 'border-slate-300 hover:border-blue-500 hover:bg-slate-50'}`}>
+                        <input 
+                          type="file" 
+                          accept={inputMode === 'image' ? 'image/*' : 'video/*'} 
+                          class="hidden" 
+                          onChange={handleFileChange} 
+                        />
+                        
+                        {uploadedFile ? (
+                          <div class="flex flex-col items-center space-y-2 text-center">
+                            <div class="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 flex items-center justify-center border border-blue-200">
+                              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <span class="text-sm font-bold text-blue-700">{uploadedFile.name}</span>
+                            <span class="text-xs text-slate-500 font-mono">{(uploadedFile.size / (1024 * 1024)).toFixed(2)} MB</span>
+                            <span class="text-xs text-emerald-700 font-bold px-3 py-1 bg-emerald-100 border border-emerald-200 rounded-lg">✓ File Loaded Successfully</span>
+                          </div>
+                        ) : (
+                          <div class="flex flex-col items-center text-center space-y-2">
+                            <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-500 flex items-center justify-center border border-slate-200">
+                              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                            </div>
+                            <span class="text-sm font-bold text-slate-800">Drag & drop or click to browse</span>
+                            <span class="text-xs text-slate-500">
+                              {inputMode === 'image' ? 'Supports .jpg, .png, .webp' : 'Supports .mp4, .avi, .mov, .webm'}
+                            </span>
+                          </div>
+                        )}
+                      </label>
+                    )}
+
+                    {/* Mode 3: Direct URL */}
+                    {inputMode === 'url' && (
+                      <div class="space-y-2">
+                        <label class="text-xs font-bold text-slate-700 block">Direct Media URL Link</label>
+                        <input
+                          type="url"
+                          value={mediaUrlInput}
+                          onChange={(e) => setMediaUrlInput(e.target.value)}
+                          placeholder="https://example.com/sample_video.mp4"
+                          class="w-full px-4 py-3 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-blue-600 font-mono shadow-sm"
+                        />
                       </div>
                     )}
-                  </label>
 
-                  {/* Video Player Preview */}
-                  {videoPreviewUrl && (
-                    <div class="rounded-xl overflow-hidden border border-slate-800 bg-black">
-                      <video src={videoPreviewUrl} controls class="w-full max-h-48 object-contain"></video>
-                    </div>
-                  )}
+                    {/* Mode 4: Real-Time Live Webcam Stream */}
+                    {inputMode === 'webcam' && (
+                      <div class="space-y-4">
+                        <div class="relative rounded-2xl overflow-hidden border border-slate-300 bg-slate-900 aspect-video flex items-center justify-center shadow-inner">
+                          <video ref={videoRef} autoPlay playsInline muted class="w-full h-full object-cover" />
+                          <canvas ref={canvasRef} class="hidden" />
 
-                  {/* Action Button */}
-                  <button
-                    onClick={executeAnalysis}
-                    disabled={loading || !uploadedFile}
-                    class="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-2xl shadow-lg transition flex items-center justify-center gap-2 text-base"
-                  >
-                    {loading ? (
-                      <>
-                        <svg class="animate-spin w-5 h-5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        Evaluating Tri-Modality Signals...
-                      </>
-                    ) : (
-                      <>
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        Run Fraud Analysis
-                      </>
+                          {/* Live Face Bounding Box SVG Overlay */}
+                          {isWebcamActive && liveFaceBox && (
+                            <svg class="absolute inset-0 w-full h-full pointer-events-none" viewBox={`0 0 ${liveFaceBox.w_img || 640} ${liveFaceBox.h_img || 480}`}>
+                              <rect
+                                x={liveFaceBox.x}
+                                y={liveFaceBox.y}
+                                width={liveFaceBox.w}
+                                height={liveFaceBox.h}
+                                fill="none"
+                                stroke={analysisResult?.prediction === 'FAKE' ? '#ef4444' : '#10b981'}
+                                stroke-width="3"
+                                stroke-dasharray="6 3"
+                                rx="8"
+                              />
+                              <text
+                                x={liveFaceBox.x}
+                                y={Math.max(16, liveFaceBox.y - 8)}
+                                fill={analysisResult?.prediction === 'FAKE' ? '#ef4444' : '#10b981'}
+                                font-size="12"
+                                font-weight="bold"
+                                font-family="sans-serif"
+                              >
+                                {analysisResult?.prediction === 'FAKE' ? '🚨 DEEPFAKE DETECTED' : '🟢 AUTHENTIC FACE'}
+                              </text>
+                            </svg>
+                          )}
+
+                          {!isWebcamActive && (
+                            <div class="text-center p-6 space-y-3">
+                              <div class="w-12 h-12 rounded-2xl bg-slate-800 text-blue-400 mx-auto flex items-center justify-center border border-slate-700">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                              </div>
+                              <span class="text-xs text-slate-300 font-semibold block">Live Camera Inference Ready</span>
+                              <p class="text-[11px] text-slate-400 max-w-xs mx-auto">Click Start Live Stream to begin real-time 2 FPS video frame analysis & Grad-CAM tracking.</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {webcamError && (
+                          <div class="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-600 text-xs font-semibold text-center">
+                            {webcamError}
+                          </div>
+                        )}
+
+                        <div class="flex items-center gap-3">
+                          {!isWebcamActive ? (
+                            <button
+                              onClick={startWebcamStream}
+                              class="flex-1 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition"
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                              Start Live Webcam Stream
+                            </button>
+                          ) : (
+                            <button
+                              onClick={stopWebcamStream}
+                              class="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition"
+                            >
+                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"></path></svg>
+                              Stop Live Webcam Stream
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     )}
-                  </button>
 
-                  {error && (
-                    <div class="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-400 text-xs">
-                      <strong>Analysis Error:</strong> {error}
+                    {/* Forensic Sensitivity Controls Panel */}
+                    <div class="pt-2 border-t border-slate-200 space-y-3">
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                          Forensic Sensitivity & Weight Controls
+                        </span>
+                      </div>
+
+                      <div class="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                        <div class="flex items-center justify-between">
+                          <span class="font-semibold text-slate-700">Visual Modality Weight</span>
+                          <span class="font-mono font-bold text-blue-600">{visualWeight}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="10"
+                          max="90"
+                          value={visualWeight}
+                          onChange={(e) => setVisualWeight(Number(e.target.value))}
+                          class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                        />
+
+                        <div class="flex items-center justify-between pt-1">
+                          <span class="font-semibold text-slate-700">Anomaly Alert Threshold</span>
+                          <span class="font-mono font-bold text-rose-600">{anomalyThreshold}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="20"
+                          max="80"
+                          value={anomalyThreshold}
+                          onChange={(e) => setAnomalyThreshold(Number(e.target.value))}
+                          class="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-600"
+                        />
+                      </div>
                     </div>
-                  )}
+
+                    {mediaPreviewUrl && (
+                      <div class="rounded-xl overflow-hidden border border-slate-200 bg-black">
+                        {inputMode === 'image' ? (
+                          <img src={mediaPreviewUrl} class="w-full max-h-48 object-contain" />
+                        ) : (
+                          <video src={mediaPreviewUrl} controls class="w-full max-h-48 object-contain"></video>
+                        )}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={executeAnalysis}
+                      disabled={loading || (inputMode !== 'url' && !uploadedFile) || (inputMode === 'url' && !mediaUrlInput.trim())}
+                      class="w-full py-4 btn-blue disabled:opacity-40 disabled:cursor-not-allowed font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 shadow-md"
+                    >
+                      {loading ? (
+                        <>
+                          <svg class="animate-spin w-5 h-5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                          Evaluating Tri-Modality ML & Grad-CAM...
+                        </>
+                      ) : (
+                        <>
+                          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                          Run Deepfake Analysis
+                        </>
+                      )}
+                    </button>
+
+                    {error && (
+                      <div class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold">
+                        <strong>Error:</strong> {error}
+                      </div>
+                    )}
+                  </div>
+
                 </div>
 
-              </div>
-
-              {/* Right Display Column: Risk Score Gauge & Modality Breakdown */}
-              <div class="lg:col-span-7 space-y-6">
-                
-                {analysisResult ? (
-                  <>
-                    {/* Executive Risk Score Card */}
-                    <div class={`glass-card rounded-2xl p-6 relative overflow-hidden ${analysisResult.prediction === 'FAKE' ? 'border-rose-500/40 pulse-glow' : 'border-emerald-500/40'}`}>
-                      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                        
-                        {/* Risk Score Circle Gauge */}
-                        <div class="flex items-center gap-6">
-                          <div class="relative w-28 h-28 flex items-center justify-center">
-                            <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                              <path class="text-slate-800" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                              <path class={analysisResult.prediction === 'FAKE' ? 'text-rose-500' : 'text-emerald-400'} stroke-dasharray={`${analysisResult.fraud_risk_percent}, 100`} stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            </svg>
-                            <div class="absolute flex flex-col items-center">
-                              <span class="text-2xl font-black">{analysisResult.fraud_risk_percent}%</span>
-                              <span class="text-[9px] uppercase font-bold tracking-wider text-slate-400">Fraud Risk</span>
+                {/* Right Column: Dashboard */}
+                <div class="lg:col-span-7 space-y-6">
+                  
+                  {analysisResult ? (
+                    <>
+                      {/* Hero Verdict Card */}
+                      <div class={`white-card p-6 border-l-8 ${analysisResult.prediction === 'FAKE' ? 'border-l-rose-600 bg-rose-50/30' : analysisResult.prediction === 'SUSPICIOUS' ? 'border-l-amber-500 bg-amber-50/30' : 'border-l-emerald-600 bg-emerald-50/30'}`}>
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                          
+                          <div class="flex items-center gap-6">
+                            <div class="relative w-24 h-24 flex items-center justify-center">
+                              <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                                <path class="text-slate-200" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                <path class={analysisResult.prediction === 'FAKE' ? 'text-rose-600' : analysisResult.prediction === 'SUSPICIOUS' ? 'text-amber-500' : 'text-emerald-600'} stroke-dasharray={`${analysisResult.fraud_risk_percent}, 100`} stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                              </svg>
+                              <div class="absolute flex flex-col items-center">
+                                <span class="text-2xl font-black text-slate-900">{analysisResult.fraud_risk_percent}%</span>
+                                <span class="text-[9px] uppercase font-bold text-slate-500">Risk Score</span>
+                              </div>
                             </div>
-                          </div>
 
-                          <div>
-                            <div class="flex items-center gap-2">
-                              <span class={`text-sm font-black px-3 py-1 rounded-md uppercase tracking-wide ${analysisResult.prediction === 'FAKE' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'}`}>
-                                {analysisResult.risk_level} FRAUD RISK ({analysisResult.prediction})
+                            <div>
+                              <span class={`text-xs font-black px-3 py-1 rounded-lg uppercase tracking-wider ${analysisResult.prediction === 'FAKE' ? 'bg-rose-100 text-rose-700 border border-rose-300' : analysisResult.prediction === 'SUSPICIOUS' ? 'bg-amber-100 text-amber-700 border border-amber-300' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'}`}>
+                                {analysisResult.risk_level} RISK ({analysisResult.prediction})
                               </span>
+                              <p class="text-xs text-slate-700 font-semibold mt-2">
+                                Format: <span class="text-blue-600 font-bold">{analysisResult.media_type || 'Video'}</span> &nbsp;|&nbsp; Confidence: <span class="text-blue-600 font-bold">{analysisResult.confidence}</span>
+                              </p>
+                              <p class="text-xs text-slate-600 mt-1">
+                                Flagged Cue: <span class="text-slate-900 font-bold">{analysisResult.trigger_modality}</span>
+                              </p>
                             </div>
-                            <p class="text-xs text-slate-300 font-semibold mt-2">
-                              Confidence Level: <span class="text-indigo-400 font-bold">{analysisResult.confidence}</span>
-                            </p>
-                            <p class="text-xs text-slate-400 mt-1">
-                              Flagged Cue: <span class="text-slate-200 font-medium">{analysisResult.trigger_modality}</span>
-                            </p>
                           </div>
-                        </div>
 
-                      </div>
-                    </div>
-
-                    {/* Tri-Modality Breakdown Cards */}
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      
-                      {/* Card 1: Video CNN */}
-                      <div class="glass-card rounded-2xl p-5 space-y-3">
-                        <div class="flex items-center justify-between">
-                          <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">1. Visual Authenticity</span>
-                          <span class="text-xs font-extrabold text-indigo-400">{analysisResult.video.visual_score_percent}% Fake</span>
-                        </div>
-                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                          <div class="bg-indigo-500 h-full transition-all" style={{ width: `${analysisResult.video.visual_score_percent}%` }}></div>
-                        </div>
-                        <p class="text-xs text-slate-400">
-                          EfficientNet-B0 visual classifier evaluating {analysisResult.video.frames_evaluated} temporal face frames.
-                        </p>
-                      </div>
-
-                      {/* Card 2: Audio Spectrogram */}
-                      <div class="glass-card rounded-2xl p-5 space-y-3">
-                        <div class="flex items-center justify-between">
-                          <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">2. Speech Authenticity</span>
-                          <span class="text-xs font-extrabold text-purple-400">{analysisResult.audio.audio_score_percent}% Synthetic</span>
-                        </div>
-                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                          <div class="bg-purple-500 h-full transition-all" style={{ width: `${analysisResult.audio.audio_score_percent}%` }}></div>
-                        </div>
-                        <p class="text-xs text-slate-400">
-                          2D-CNN Spectrogram classifier scoring voice cloning & speech synthesis acoustic cues.
-                        </p>
-                      </div>
-
-                      {/* Card 3: Lip-Sync Mismatch */}
-                      <div class="glass-card rounded-2xl p-5 space-y-3">
-                        <div class="flex items-center justify-between">
-                          <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">3. Lip-Sync Mismatch</span>
-                          <span class="text-xs font-extrabold text-amber-400">{(analysisResult.sync.sync_mismatch_score * 100).toFixed(1)}% Mismatch</span>
-                        </div>
-                        <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                          <div class="bg-amber-500 h-full transition-all" style={{ width: `${analysisResult.sync.sync_mismatch_score * 100}%` }}></div>
-                        </div>
-                        <p class="text-xs text-slate-400">
-                          Cross-modal timing correlation between lip opening motion & speech energy envelope.
-                        </p>
-                      </div>
-
-                    </div>
-
-                    {/* Forensic Analyst Decision Panel */}
-                    <div class="glass-card rounded-2xl p-6 space-y-4">
-                      <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                        <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                        Forensic Review & Verification Action
-                      </h3>
-
-                      {analystDecision ? (
-                        <div class="p-4 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-center space-y-1">
-                          <span class="text-sm font-bold text-emerald-300 block">✓ Decision Recorded: {analystDecision}</span>
-                          <span class="text-xs text-slate-400 block">Saved to MySQL database (`verification_history` table)</span>
-                        </div>
-                      ) : (
-                        <div class="grid grid-cols-3 gap-3">
-                          <button 
-                            onClick={() => recordDecision('APPROVED (AUTHENTIC)')}
-                            class="py-3 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 rounded-xl font-semibold text-xs transition"
+                          <button
+                            onClick={downloadPdfReport}
+                            class="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 transition"
                           >
-                            Approve Verification
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 01-2-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                            Export Audit PDF
                           </button>
-                          <button 
-                            onClick={() => recordDecision('FLAGGED FOR DEEPFAKE AUDIT')}
-                            class="py-3 bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40 rounded-xl font-semibold text-xs transition"
-                          >
-                            Flag for Deepfake Audit
-                          </button>
-                          <button 
-                            onClick={() => recordDecision('REJECTED (FRAUD)')}
-                            class="py-3 bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 rounded-xl font-semibold text-xs transition"
-                          >
-                            Reject Fraud Attempt
-                          </button>
+
+                        </div>
+                      </div>
+
+                      {/* Explainable AI Rationale Box */}
+                      {analysisResult.ai_explanation && (
+                        <div class="white-card p-5 border-blue-200 bg-blue-50/60 space-y-2">
+                          <span class="text-xs font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Explainable AI (XAI) Forensic Rationale
+                          </span>
+                          <p class="text-xs text-slate-800 leading-relaxed font-medium">
+                            {analysisResult.ai_explanation}
+                          </p>
                         </div>
                       )}
+
+                      {/* Human Presence & Subject Detection Badge */}
+                      {analysisResult.human_detection && (
+                        <div class="white-card p-4 flex items-center justify-between border-l-4 border-l-indigo-600 bg-indigo-50/40">
+                          <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+                              {analysisResult.human_detection.has_human ? '👤' : '🏞️'}
+                            </div>
+                            <div>
+                              <span class="text-xs font-extrabold text-slate-900 block">
+                                Subject Classification: {analysisResult.human_detection.has_human ? 'Human Face & Body Detected' : 'General Scene / Non-Human Content'}
+                              </span>
+                              <span class="text-[11px] font-medium text-slate-600">
+                                {analysisResult.human_detection.has_human 
+                                  ? `Detected ${analysisResult.human_detection.face_count} Human Face(s) and ${analysisResult.human_detection.body_count} Body Region(s)`
+                                  : 'Evaluating global scene composition & background generative diffusion grid artifacts'}
+                              </span>
+                            </div>
+                          </div>
+                          <span class={`text-[10px] font-extrabold px-3 py-1 rounded-lg border ${analysisResult.human_detection.has_human ? 'bg-indigo-100 text-indigo-800 border-indigo-300' : 'bg-slate-200 text-slate-700 border-slate-300'}`}>
+                            {analysisResult.human_detection.has_human ? 'HUMAN ROI ACTIVE' : 'GLOBAL SCENE MODE'}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Transfer Learning Multi-Model Benchmarking Grid */}
+                      {analysisResult.model_benchmark && (
+                        <div class="white-card p-6 space-y-4 border-l-4 border-l-purple-600">
+                          <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+                            <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                              <svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L5.6 15.11a2 2 0 00-1.22.14L2 16.29V21h20v-5.572l-2.572-.001z"></path></svg>
+                              Transfer Learning Multi-Model Ensemble Benchmarks
+                            </h3>
+                            <span class="text-[10px] font-extrabold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
+                              4 Vision Backbones + 2 Forensics
+                            </span>
+                          </div>
+
+                          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                              <span class="text-slate-500 font-extrabold text-[10px] uppercase block">EfficientNet-B0</span>
+                              <span class="font-mono font-bold text-slate-900 text-base">{analysisResult.model_benchmark.efficientnet_b0}%</span>
+                            </div>
+
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                              <span class="text-slate-500 font-extrabold text-[10px] uppercase block">ResNet-50</span>
+                              <span class="font-mono font-bold text-slate-900 text-base">{analysisResult.model_benchmark.resnet50}%</span>
+                            </div>
+
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                              <span class="text-slate-500 font-extrabold text-[10px] uppercase block">ConvNeXt-Tiny</span>
+                              <span class="font-mono font-bold text-slate-900 text-base">{analysisResult.model_benchmark.convnext_tiny}%</span>
+                            </div>
+
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                              <span class="text-slate-500 font-extrabold text-[10px] uppercase block">DenseNet-121</span>
+                              <span class="font-mono font-bold text-slate-900 text-base">{analysisResult.model_benchmark.densenet121}%</span>
+                            </div>
+
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                              <span class="text-slate-500 font-extrabold text-[10px] uppercase block">ELA Compression Residual</span>
+                              <span class="font-mono font-bold text-slate-900 text-base">{analysisResult.model_benchmark.ela_compression_residual}%</span>
+                            </div>
+
+                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                              <span class="text-slate-500 font-extrabold text-[10px] uppercase block">2D FFT Frequency Grid</span>
+                              <span class="font-mono font-bold text-slate-900 text-base">{analysisResult.model_benchmark.fft_frequency_spectrum}%</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Domain Safety & Phishing Inspection Card */}
+                      {analysisResult.domain_analysis && (
+                        <div class="white-card p-6 space-y-4 border-l-4 border-l-blue-600">
+                          <div class="flex items-center justify-between border-b border-slate-200 pb-3">
+                            <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"></path></svg>
+                              Web Domain Safety & Phishing Inspection
+                            </h3>
+                            <span class={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg border ${analysisResult.domain_analysis.ssl_encrypted ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'}`}>
+                              {analysisResult.domain_analysis.ssl_encrypted ? '🔒 SSL HTTPS ENCRYPTED' : '⚠️ UNENCRYPTED HTTP'}
+                            </span>
+                          </div>
+
+                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                            <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1">
+                              <span class="text-slate-500 font-bold text-[10px] uppercase block">Host Domain Name</span>
+                              <span class="font-mono font-bold text-slate-900 text-sm block truncate">{analysisResult.domain_analysis.hostname}</span>
+                            </div>
+
+                            {analysisResult.domain_analysis.impersonated_brand && (
+                              <div class="bg-rose-50 p-3.5 rounded-xl border border-rose-200 space-y-1">
+                                <span class="text-rose-800 font-bold text-[10px] uppercase block">Spoofed / Imitated Brand</span>
+                                <span class="font-bold text-rose-700 text-sm block">🚨 {analysisResult.domain_analysis.impersonated_brand}</span>
+                                <span class="text-[10px] text-rose-600 font-mono block">Official: {analysisResult.domain_analysis.official_domain}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Phishing Indicator Checklist */}
+                          {analysisResult.domain_analysis.phishing_indicators && analysisResult.domain_analysis.phishing_indicators.length > 0 && (
+                            <div class="space-y-2 pt-2">
+                              <span class="text-[11px] font-bold text-rose-700 uppercase tracking-wider block">Threat Cues & Phishing Indicators ({analysisResult.domain_analysis.phishing_indicators.length})</span>
+                              <div class="space-y-1.5">
+                                {analysisResult.domain_analysis.phishing_indicators.map((ind, idx) => (
+                                  <div key={idx} class="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs font-semibold text-rose-800 flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full bg-rose-600 shrink-0"></span>
+                                    <span>{ind}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Interactive Second-by-Second Suspicious Risk Graph */}
+                      {analysisResult.timeline_risk && analysisResult.timeline_risk.length > 0 && (
+                        <div class="white-card p-6 space-y-4">
+                          <div class="flex items-center justify-between">
+                            <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                              <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path></svg>
+                              Video Fraud Risk Trend & Timeline Graph
+                            </h3>
+                            <span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                              -- Threshold: 45.0% Anomaly
+                            </span>
+                          </div>
+
+                          {/* Graph Canvas / SVG Curve Representation */}
+                          <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                            {(() => {
+                              const points = analysisResult.timeline_risk || [];
+                              if (points.length === 0) return null;
+
+                              const svgW = 600;
+                              const svgH = 160;
+                              const padding = 24;
+                              const usableW = svgW - padding * 2;
+                              const usableH = svgH - padding * 2;
+
+                              const coords = points.map((pt, i) => {
+                                const x = padding + (points.length > 1 ? (i / (points.length - 1)) * usableW : usableW / 2);
+                                const y = (svgH - padding) - (pt.risk_percent / 100) * usableH;
+                                return { x, y, pt };
+                              });
+
+                              const polylineStr = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ');
+                              const areaStr = `M ${coords[0].x.toFixed(1)},${svgH - padding} ` + 
+                                coords.map(c => `L ${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(' ') + 
+                                ` L ${coords[coords.length - 1].x.toFixed(1)},${svgH - padding} Z`;
+                              const thresholdY = (svgH - padding) - (45 / 100) * usableH;
+
+                              return (
+                                <div class="relative w-full overflow-hidden">
+                                  <svg viewBox={`0 0 ${svgW} ${svgH}`} class="w-full h-44 drop-shadow-sm">
+                                    <defs>
+                                      <linearGradient id="riskAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#ef4444" stop-opacity="0.35" />
+                                        <stop offset="50%" stop-color="#3b82f6" stop-opacity="0.2" />
+                                        <stop offset="100%" stop-color="#3b82f6" stop-opacity="0.0" />
+                                      </linearGradient>
+                                      <linearGradient id="riskLineGrad" x1="0" y1="0" x2="1" y2="0">
+                                        <stop offset="0%" stop-color="#2563eb" />
+                                        <stop offset="50%" stop-color="#dc2626" />
+                                        <stop offset="100%" stop-color="#2563eb" />
+                                      </linearGradient>
+                                    </defs>
+
+                                    {/* Grid Lines */}
+                                    <line x1={padding} y1={padding} x2={svgW - padding} y2={padding} stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 3" />
+                                    <line x1={padding} y1={padding + usableH * 0.5} x2={svgW - padding} y2={padding + usableH * 0.5} stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3 3" />
+                                    <line x1={padding} y1={svgH - padding} x2={svgW - padding} y2={svgH - padding} stroke="#cbd5e1" stroke-width="1.5" />
+
+                                    {/* 45% Red Threshold Line */}
+                                    <line x1={padding} y1={thresholdY} x2={svgW - padding} y2={thresholdY} stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="4 4" />
+                                    <text x={svgW - padding - 80} y={thresholdY - 5} fill="#f43f5e" font-size="9" font-weight="bold" font-family="sans-serif">45% Anomaly Limit</text>
+
+                                    {/* Gradient Area Fill */}
+                                    <path d={areaStr} fill="url(#riskAreaGrad)" />
+
+                                    {/* Wave Polyline */}
+                                    <polyline points={polylineStr} fill="none" stroke="url(#riskLineGrad)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+
+                                    {/* Interactive Data Node Points */}
+                                    {coords.map((c, i) => {
+                                      const isSuspicious = c.pt.risk_percent >= 45.0;
+                                      const isHovered = activeHoverPoint && activeHoverPoint.timestamp_sec === c.pt.timestamp_sec;
+
+                                      return (
+                                        <g key={i} class="cursor-pointer" onMouseEnter={() => setActiveHoverPoint(c.pt)} onMouseLeave={() => setActiveHoverPoint(null)}>
+                                          <circle 
+                                            cx={c.x} 
+                                            cy={c.y} 
+                                            r={isHovered ? "7" : "4.5"} 
+                                            fill={isSuspicious ? "#dc2626" : "#2563eb"} 
+                                            stroke="#ffffff" 
+                                            stroke-width="2" 
+                                            class="transition-all duration-150"
+                                          />
+                                          {isHovered && (
+                                            <circle cx={c.x} cy={c.y} r="10" fill="none" stroke={isSuspicious ? "#f87171" : "#60a5fa"} stroke-width="2" opacity="0.8" />
+                                          )}
+                                        </g>
+                                      );
+                                    })}
+                                  </svg>
+
+                                  {/* Timeline X-Axis Labels */}
+                                  <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono pt-1">
+                                    <span>Start ({points[0]?.timestamp_str || '00:00s'})</span>
+                                    <span>Sampling Interval ({points.length} Frame Checkpoints)</span>
+                                    <span>End ({points[points.length - 1]?.timestamp_str || 'End'})</span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+
+                          {activeHoverPoint && (
+                            <div class="p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs flex items-center justify-between text-blue-900">
+                              <span>Hovered Timestamp: <strong>{activeHoverPoint.timestamp_str}</strong></span>
+                              <span>Fraud Risk: <strong>{activeHoverPoint.risk_percent}%</strong> ({activeHoverPoint.risk_percent >= 45 ? '🚨 SUSPICIOUS' : '🟢 NORMAL'})</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 3-Modality Scores */}
+                      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        
+                        <div class="white-card p-4 space-y-2">
+                          <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-slate-700 uppercase">1. Visual Authenticity</span>
+                            <span class="text-xs font-extrabold text-blue-600">{analysisResult.video.visual_score_percent}% Fake</span>
+                          </div>
+                          <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                            <div class="bg-blue-600 h-full transition-all" style={{ width: `${analysisResult.video.visual_score_percent}%` }}></div>
+                          </div>
+                          <p class="text-[11px] text-slate-500">EfficientNet-B0 visual spatial classifier.</p>
+                        </div>
+
+                        <div class="white-card p-4 space-y-2">
+                          <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-slate-700 uppercase">2. Speech Authenticity</span>
+                            <span class="text-xs font-extrabold text-purple-600">{analysisResult.audio.audio_score_percent}% Synthetic</span>
+                          </div>
+                          <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                            <div class="bg-purple-600 h-full transition-all" style={{ width: `${analysisResult.audio.audio_score_percent}%` }}></div>
+                          </div>
+                          <p class="text-[11px] text-slate-500">2D-CNN Mel-Spectrogram voice clone classifier.</p>
+                        </div>
+
+                        <div class="white-card p-4 space-y-2">
+                          <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-slate-700 uppercase">3. Lip-Sync Mismatch</span>
+                            <span class="text-xs font-extrabold text-amber-600">{(analysisResult.sync.sync_mismatch_score * 100).toFixed(1)}% Mismatch</span>
+                          </div>
+                          <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                            <div class="bg-amber-600 h-full transition-all" style={{ width: `${analysisResult.sync.sync_mismatch_score * 100}%` }}></div>
+                          </div>
+                          <p class="text-[11px] text-slate-500">Cross-modal alignment between lips & audio envelope.</p>
+                        </div>
+
+                      </div>
+
+                      {/* Grad-CAM Heatmaps Gallery */}
+                      {analysisResult.heatmaps && analysisResult.heatmaps.length > 0 && (
+                        <div class="white-card p-6 space-y-4">
+                          <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            Explainable AI (Grad-CAM) Visual Heatmap Analysis
+                          </h3>
+                          <p class="text-xs text-slate-500">
+                            Red/Warm activation regions highlight spatial pixel manipulation hotspots detected by EfficientNet feature maps.
+                          </p>
+
+                          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+                            {analysisResult.heatmaps.map((hm, idx) => (
+                              <div key={idx} class="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                                <img src={hm.data_uri} class="w-full h-36 object-contain rounded-lg border border-slate-300 bg-black" />
+                                <span class="text-xs font-bold text-slate-800 block">{hm.label}</span>
+                                <span class="text-[11px] text-rose-600 font-bold block">{(hm.fake_prob * 100).toFixed(1)}% Fake Prob</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Suspicious Timestamps Log Table */}
+                      {analysisResult.suspicious_timestamps && analysisResult.suspicious_timestamps.length > 0 && (
+                        <div class="white-card p-6 space-y-4">
+                          <h3 class="text-xs font-extrabold text-amber-700 uppercase tracking-wider flex items-center gap-2">
+                            <svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Suspicious Timestamp Detection Log Table
+                          </h3>
+
+                          <div class="overflow-x-auto">
+                            <table class="w-full text-left text-xs text-slate-700">
+                              <thead class="bg-slate-100 text-[10px] uppercase text-slate-600 border-b border-slate-200">
+                                <tr>
+                                  <th class="py-2.5 px-3 font-bold">Interval Timestamp</th>
+                                  <th class="py-2.5 px-3 font-bold">Peak Anomaly Score</th>
+                                  <th class="py-2.5 px-3 font-bold">Anomaly Description</th>
+                                </tr>
+                              </thead>
+                              <tbody class="divide-y divide-slate-200">
+                                {analysisResult.suspicious_timestamps.map((ts, idx) => (
+                                  <tr key={idx} class="hover:bg-slate-50">
+                                    <td class="py-2.5 px-3 font-mono font-bold text-amber-700">{ts.timestamp_str}</td>
+                                    <td class="py-2.5 px-3 font-black text-rose-600">{ts.risk_percent}%</td>
+                                    <td class="py-2.5 px-3 text-slate-600">{ts.description}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Analyst Decision Action */}
+                      <div class="white-card p-6 space-y-4">
+                        <h3 class="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                          <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+                          Forensic Review & Verification Action
+                        </h3>
+
+                        {analystDecision ? (
+                          <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center space-y-1">
+                            <span class="text-sm font-bold text-emerald-800 block">✓ Decision Recorded: {analystDecision}</span>
+                            <span class="text-xs text-slate-500 block">Saved to Audit History</span>
+                          </div>
+                        ) : (
+                          <div class="grid grid-cols-3 gap-3">
+                            <button 
+                              onClick={() => recordDecision('APPROVED (AUTHENTIC)')}
+                              class="py-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl font-bold text-xs transition shadow-sm"
+                            >
+                              Approve Verification
+                            </button>
+                            <button 
+                              onClick={() => recordDecision('FLAGGED FOR DEEPFAKE AUDIT')}
+                              class="py-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl font-bold text-xs transition shadow-sm"
+                            >
+                              Flag for Audit
+                            </button>
+                            <button 
+                              onClick={() => recordDecision('REJECTED (FRAUD)')}
+                              class="py-3 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-xl font-bold text-xs transition shadow-sm"
+                            >
+                              Reject Fraud Attempt
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div class="white-card p-12 text-center flex flex-col items-center justify-center space-y-4 min-h-[400px]">
+                      <div class="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                      </div>
+                      <h3 class="text-base font-bold text-slate-800">No Media Analyzed Yet</h3>
+                      <p class="text-xs text-slate-500 max-w-md">
+                        Upload a video, image, or enter a media URL on the left panel to run full multimodal ML detection, view Grad-CAM heatmaps, interactive risk graphs, and export PDF audit reports.
+                      </p>
                     </div>
-                  </>
-                ) : (
-                  /* Placeholder when no video analyzed yet */
-                  <div class="glass-card rounded-2xl p-12 text-center flex flex-col items-center justify-center space-y-4 min-h-[400px]">
-                    <div class="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                      <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    </div>
-                    <h3 class="text-lg font-bold text-slate-200">No Video Uploaded Yet</h3>
-                    <p class="text-xs text-slate-400 max-w-md">
-                      Upload any video recording on the left panel to run full multimodal ML detection and view real-time fraud risk results.
-                    </p>
-                  </div>
-                )}
+                  )}
+
+                </div>
 
               </div>
+            )}
 
-            </div>
-          )}
-
-          {/* TAB 2: Verification History & Audit Records Workspace */}
-          {activeTab === 'history' && (
-            <div class="space-y-6">
-              
-              {/* Category Summary Cards */}
-              <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div class="glass-card rounded-2xl p-5 border border-slate-700/60">
-                  <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Audited Videos</span>
-                  <span class="text-2xl font-black text-slate-100 mt-1 block">{historyRecords.length}</span>
-                  <span class="text-[10px] text-indigo-400 mt-1 block font-semibold">Engine: {historyDbEngine} DB</span>
-                </div>
-
-                <div class="glass-card rounded-2xl p-5 border border-emerald-500/30 bg-emerald-500/5">
-                  <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider block">Approved Verification</span>
-                  <span class="text-2xl font-black text-emerald-300 mt-1 block">{approvedCount}</span>
-                  <span class="text-[10px] text-emerald-400/80 mt-1 block">Authentic Video Calls</span>
-                </div>
-
-                <div class="glass-card rounded-2xl p-5 border border-amber-500/30 bg-amber-500/5">
-                  <span class="text-xs font-bold text-amber-400 uppercase tracking-wider block">Sent for Manual Audit</span>
-                  <span class="text-2xl font-black text-amber-300 mt-1 block">{auditCount}</span>
-                  <span class="text-[10px] text-amber-400/80 mt-1 block">Flagged Borderline Cues</span>
-                </div>
-
-                <div class="glass-card rounded-2xl p-5 border border-rose-500/30 bg-rose-500/5">
-                  <span class="text-xs font-bold text-rose-400 uppercase tracking-wider block">Rejected Fraud Attempts</span>
-                  <span class="text-2xl font-black text-rose-300 mt-1 block">{rejectedCount}</span>
-                  <span class="text-[10px] text-rose-400/80 mt-1 block">Blocked Deepfake Scams</span>
-                </div>
-              </div>
-
-              {/* Controls & Filter Bar */}
-              <div class="glass-card rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            {/* TAB 2: Audit History */}
+            {activeTab === 'history' && (
+              <div class="space-y-6">
                 
-                {/* Status Filter Buttons */}
-                <div class="flex items-center gap-2">
-                  <button
-                    onClick={() => setHistoryFilter('ALL')}
-                    class={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'ALL' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
-                  >
-                    All ({historyRecords.length})
-                  </button>
+                <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                  <div class="white-card p-5">
+                    <span class="text-xs font-bold text-slate-500 uppercase tracking-wider block">Total Audited Videos</span>
+                    <span class="text-2xl font-black text-slate-900 mt-1 block">{historyRecords.length}</span>
+                    <span class="text-[11px] text-blue-600 mt-1 block font-bold">Engine: {historyDbEngine} DB</span>
+                  </div>
 
-                  <button
-                    onClick={() => setHistoryFilter('APPROVED')}
-                    class={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'APPROVED' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
-                  >
-                    🟢 Approved ({approvedCount})
-                  </button>
+                  <div class="white-card p-5 border-emerald-200 bg-emerald-50/50">
+                    <span class="text-xs font-bold text-emerald-800 uppercase tracking-wider block">Approved Verification</span>
+                    <span class="text-2xl font-black text-emerald-700 mt-1 block">{approvedCount}</span>
+                    <span class="text-[11px] text-emerald-600 mt-1 block font-semibold">Authentic Media Calls</span>
+                  </div>
 
-                  <button
-                    onClick={() => setHistoryFilter('AUDIT')}
-                    class={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'AUDIT' ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
-                  >
-                    🟡 Sent for Audit ({auditCount})
-                  </button>
+                  <div class="white-card p-5 border-amber-200 bg-amber-50/50">
+                    <span class="text-xs font-bold text-amber-800 uppercase tracking-wider block">Sent for Manual Audit</span>
+                    <span class="text-2xl font-black text-amber-700 mt-1 block">{auditCount}</span>
+                    <span class="text-[11px] text-amber-600 mt-1 block font-semibold">Flagged Borderline Cues</span>
+                  </div>
 
-                  <button
-                    onClick={() => setHistoryFilter('REJECTED')}
-                    class={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'REJECTED' ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
-                  >
-                    🔴 Rejected ({rejectedCount})
-                  </button>
+                  <div class="white-card p-5 border-rose-200 bg-rose-50/50">
+                    <span class="text-xs font-bold text-rose-800 uppercase tracking-wider block">Rejected Fraud Attempts</span>
+                    <span class="text-2xl font-black text-rose-700 mt-1 block">{rejectedCount}</span>
+                    <span class="text-[11px] text-rose-600 mt-1 block font-semibold">Blocked Deepfake Scams</span>
+                  </div>
                 </div>
 
-                {/* Search Box */}
-                <div class="relative w-full sm:w-64">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search filename or request ID..."
-                    class="w-full pl-9 pr-4 py-2 bg-slate-900/90 border border-slate-700 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
-                  />
-                  <svg class="w-4 h-4 text-slate-500 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 9 0 0114 0z"></path></svg>
+                <div class="white-card p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div class="flex items-center gap-2">
+                    <button onClick={() => setHistoryFilter('ALL')} class={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'ALL' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>All ({historyRecords.length})</button>
+                    <button onClick={() => setHistoryFilter('APPROVED')} class={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'APPROVED' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>🟢 Approved ({approvedCount})</button>
+                    <button onClick={() => setHistoryFilter('AUDIT')} class={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'AUDIT' ? 'bg-amber-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>🟡 Sent for Audit ({auditCount})</button>
+                    <button onClick={() => setHistoryFilter('REJECTED')} class={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${historyFilter === 'REJECTED' ? 'bg-rose-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>🔴 Rejected ({rejectedCount})</button>
+                  </div>
+
+                  <div class="relative w-full sm:w-64">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search filename or request ID..."
+                      class="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-blue-600 font-mono shadow-sm"
+                    />
+                    <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 9 0 0114 0z"></path></svg>
+                  </div>
+                </div>
+
+                <div class="white-card overflow-hidden">
+                  {filteredRecords.length > 0 ? (
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left text-xs text-slate-700">
+                        <thead class="bg-slate-100 uppercase tracking-wider text-[10px] text-slate-600 border-b border-slate-200">
+                          <tr>
+                            <th class="py-3.5 px-4 font-bold">Timestamp</th>
+                            <th class="py-3.5 px-4 font-bold">Media File</th>
+                            <th class="py-3.5 px-4 font-bold">Fraud Risk</th>
+                            <th class="py-3.5 px-4 font-bold">AI Prediction</th>
+                            <th class="py-3.5 px-4 font-bold">Flagged Modality</th>
+                            <th class="py-3.5 px-4 font-bold">Analyst Decision</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-200">
+                          {filteredRecords.map((rec, idx) => {
+                            const decision = rec.analyst_decision || rec.decision || 'N/A';
+                            const isApprove = decision.toUpperCase().includes('APPROV');
+                            const isAudit = decision.toUpperCase().includes('AUDIT') || decision.toUpperCase().includes('FLAG');
+                            const isReject = decision.toUpperCase().includes('REJECT');
+
+                            return (
+                              <tr key={idx} class="hover:bg-slate-50 transition">
+                                <td class="py-3.5 px-4 font-mono text-[11px] text-slate-500">{new Date(rec.timestamp).toLocaleString()}</td>
+                                <td class="py-3.5 px-4 font-semibold text-slate-900">{rec.filename}<span class="block text-[10px] font-mono text-slate-500 mt-0.5">{rec.request_id}</span></td>
+                                <td class="py-3.5 px-4 font-black"><span class={`px-2.5 py-1 rounded-md text-[11px] ${rec.fraud_risk_percent > 60 ? 'text-rose-700 bg-rose-100' : rec.fraud_risk_percent > 30 ? 'text-amber-700 bg-amber-100' : 'text-emerald-700 bg-emerald-100'}`}>{rec.fraud_risk_percent}%</span></td>
+                                <td class="py-3.5 px-4 font-bold"><span class={`px-2 py-0.5 rounded text-[10px] uppercase ${rec.prediction === 'FAKE' ? 'bg-rose-100 text-rose-700 border border-rose-300' : rec.prediction === 'SUSPICIOUS' ? 'bg-amber-100 text-amber-700 border border-amber-300' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'}`}>{rec.prediction}</span></td>
+                                <td class="py-3.5 px-4 text-slate-600 max-w-xs truncate">{rec.trigger_modality}</td>
+                                <td class="py-3.5 px-4"><span class={`px-3 py-1 rounded-xl text-[11px] font-bold inline-block ${isApprove ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : isAudit ? 'bg-amber-100 text-amber-800 border border-amber-300' : 'bg-rose-100 text-rose-800 border border-rose-300'}`}>{decision}</span></td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div class="p-12 text-center space-y-3">
+                      <p class="text-sm font-semibold text-slate-500">No verification records match your filter criteria.</p>
+                    </div>
+                  )}
                 </div>
 
               </div>
+            )}
 
-              {/* Records Table */}
-              <div class="glass-card rounded-2xl overflow-hidden border border-slate-800">
-                {filteredRecords.length > 0 ? (
-                  <div class="overflow-x-auto">
-                    <table class="w-full text-left text-xs text-slate-300">
-                      <thead class="bg-slate-900/90 uppercase tracking-wider text-[10px] text-slate-400 border-b border-slate-800">
-                        <tr>
-                          <th class="py-3.5 px-4 font-bold">Timestamp</th>
-                          <th class="py-3.5 px-4 font-bold">Video File</th>
-                          <th class="py-3.5 px-4 font-bold">Fraud Risk</th>
-                          <th class="py-3.5 px-4 font-bold">AI Prediction</th>
-                          <th class="py-3.5 px-4 font-bold">Flagged Modality</th>
-                          <th class="py-3.5 px-4 font-bold">Analyst Verification Decision</th>
-                        </tr>
-                      </thead>
-                      <tbody class="divide-y divide-slate-800/80">
-                        {filteredRecords.map((rec, idx) => {
-                          const decision = rec.analyst_decision || rec.decision || 'N/A';
-                          const isApprove = decision.toUpperCase().includes('APPROV');
-                          const isAudit = decision.toUpperCase().includes('AUDIT') || decision.toUpperCase().includes('FLAG');
-                          const isReject = decision.toUpperCase().includes('REJECT');
-
-                          return (
-                            <tr key={idx} class="hover:bg-slate-800/40 transition">
-                              <td class="py-3.5 px-4 font-mono text-[11px] text-slate-400">
-                                {new Date(rec.timestamp).toLocaleString()}
-                              </td>
-                              
-                              <td class="py-3.5 px-4 font-semibold text-slate-200">
-                                {rec.filename}
-                                <span class="block text-[10px] font-mono text-slate-500 mt-0.5">{rec.request_id}</span>
-                              </td>
-
-                              <td class="py-3.5 px-4 font-black">
-                                <span class={`px-2 py-0.5 rounded text-[11px] ${rec.fraud_risk_percent > 60 ? 'text-rose-400 bg-rose-500/10' : rec.fraud_risk_percent > 30 ? 'text-amber-400 bg-amber-500/10' : 'text-emerald-400 bg-emerald-500/10'}`}>
-                                  {rec.fraud_risk_percent}%
-                                </span>
-                              </td>
-
-                              <td class="py-3.5 px-4 font-bold">
-                                <span class={`px-2 py-0.5 rounded text-[10px] uppercase ${rec.prediction === 'FAKE' ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
-                                  {rec.prediction}
-                                </span>
-                              </td>
-
-                              <td class="py-3.5 px-4 text-slate-400 max-w-xs truncate">
-                                {rec.trigger_modality}
-                              </td>
-
-                              <td class="py-3.5 px-4">
-                                <span class={`px-3 py-1 rounded-lg text-[11px] font-bold inline-block ${isApprove ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : isAudit ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : isReject ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'bg-slate-800 text-slate-300'}`}>
-                                  {decision}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div class="p-12 text-center space-y-3">
-                    <p class="text-sm font-semibold text-slate-400">No verification records match your filter criteria.</p>
-                    <p class="text-xs text-slate-500">Run a video fraud analysis on the main workspace and record a decision to populate history.</p>
-                  </div>
-                )}
-              </div>
-
-            </div>
-          )}
+          </main>
 
         </div>
       );
