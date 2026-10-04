@@ -87,12 +87,13 @@ def parse_args():
     )
     p.add_argument(
         "--pretrained",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
         help=(
             "Load weights from the existing checkpoint "
             "checkpoints/image_deepfake/efficientnet_b0_image_best.pth "
-            "before retraining (default: True)."
+            "before retraining (default: True). "
+            "Pass --no-pretrained to train from ImageNet weights only."
         ),
     )
     p.add_argument(
@@ -221,6 +222,10 @@ def main():
     best_val_acc = 0.0
     epochs_no_improve = 0
     patience = 5
+    # Initialised here so the final-checkpoint save outside the loop is safe
+    # even when --epochs 0 is passed (loop body would never execute otherwise).
+    val_acc = 0.0
+    epoch = -1
 
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
     best_ckpt_path  = CKPT_DIR / BEST_CKPT_NAME
@@ -300,18 +305,20 @@ def main():
                 )
                 break
 
-    # Save final checkpoint regardless of whether it is the best
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "val_accuracy":     val_acc,
-            "epoch":            epoch + 1,
-            "dataset":          "CIFAKE",
-            "threshold":        0.5,
-        },
-        final_ckpt_path,
-    )
-    print(f"\n[SAVED] Final checkpoint → {final_ckpt_path}", flush=True)
+    # Save final checkpoint regardless of whether it is the best.
+    # Guard against --epochs 0 (loop never ran; nothing worth saving).
+    if epochs > 0:
+        torch.save(
+            {
+                "model_state_dict": model.state_dict(),
+                "val_accuracy":     val_acc,
+                "epoch":            epoch + 1,
+                "dataset":          "CIFAKE",
+                "threshold":        0.5,
+            },
+            final_ckpt_path,
+        )
+        print(f"\n[SAVED] Final checkpoint → {final_ckpt_path}", flush=True)
 
     print("=" * 65, flush=True)
     print(
