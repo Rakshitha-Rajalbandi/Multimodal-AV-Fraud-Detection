@@ -82,7 +82,7 @@ def load_all_models():
             state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
             IMAGE_MODEL.load_state_dict(state_dict, strict=False)
             IMAGE_MODEL.to(DEVICE).eval()
-            IMAGE_GRADCAM_ENGINE = GradCAM(IMAGE_MODEL)
+            IMAGE_GRADCAM_ENGINE = GradCAM(IMAGE_MODEL, is_video_model=False)
             print("  - Pure Image Deepfake Classifier (EfficientNet-B0) loaded.", flush=True)
         except Exception as e:
             print(f"  - Warning: Failed to load Image model checkpoint: {e}", flush=True)
@@ -556,8 +556,11 @@ def detect_human_presence(pil_img):
         face_cascade = cv2.CascadeClassifier(cascade_path)
         if not face_cascade.empty():
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
-            for (x, y, w, h) in faces:
-                bounding_boxes.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h), "type": "face"})
+            if len(faces) > 0:
+                # Sort by area descending — largest box first
+                faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+                for (x, y, w, h) in faces[:1]:  # use only the largest
+                    bounding_boxes.append({"x": int(x), "y": int(y), "w": int(w), "h": int(h), "type": "face"})
     except Exception:
         pass
 
@@ -659,16 +662,18 @@ def analyze_image(image_path, work_dir=None):
 
     # 3. Trained Neural Network (EfficientNet-B0 Image Classifier) Prediction
     fake_prob = 0.50
-    target_crop = face_roi if (has_human and face_roi is not None) else pil_img
-    t_single = video_transform(target_crop).unsqueeze(0).to(DEVICE)
 
     if IMAGE_MODEL is not None:
         try:
-            with torch.no_grad():
-                logits = IMAGE_MODEL(t_single)
-                probs = torch.softmax(logits, dim=-1)
-                # Class 0 = FAKE, Class 1 = REAL
-                fake_prob = float(probs[0, 0].item())
+            fake_probs = []
+            for crop in crops:
+                t = video_transform(crop).unsqueeze(0).to(DEVICE)
+                with torch.no_grad():
+                    logits = IMAGE_MODEL(t)
+                    probs = torch.softmax(logits, dim=-1)
+                    # Class 0 = FAKE, Class 1 = REAL
+                    fake_probs.append(float(probs[0, 0].item()))
+            fake_prob = float(np.mean(fake_probs))
         except Exception as e:
             return {
                 "media_type": "Static Image",
@@ -699,6 +704,7 @@ def analyze_image(image_path, work_dir=None):
             }
     elif VIDEO_MODEL is not None:
         try:
+            t_single = video_transform(pil_img).unsqueeze(0).to(DEVICE)
             t_seq = t_single.unsqueeze(1).repeat(1, 8, 1, 1, 1)
             with torch.no_grad():
                 logits = VIDEO_MODEL(t_seq)
