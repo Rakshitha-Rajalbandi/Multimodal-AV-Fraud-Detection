@@ -36,6 +36,8 @@ from torch.utils.data import DataLoader
 
 from train.cifake_dataset import CIFAKEDataset
 from models.image_model import ImageDeepfakeModel
+from models.image_model import EnhancedImageDeepfakeModel
+from train.metrics import calculate_metrics, print_metrics_summary
 
 # ── Fixed architecture constants ────────────────────────────────────────────
 IMAGE_SIZE = 160
@@ -102,6 +104,18 @@ def parse_args():
         default=str(PROJECT_ROOT / "data" / "cifake"),
         help="Path to the CIFAKE root folder (default: <project_root>/data/cifake).",
     )
+    p.add_argument(
+        "--model",
+        choices=["b0", "b4"],
+        default="b0",
+        help="Backbone architecture: b0 (EfficientNet-B0, IMAGE_SIZE=160) or b4 (EfficientNet-B4, IMAGE_SIZE=380). Default: b0.",
+    )
+    p.add_argument(
+        "--use_fft_branch",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable FFT frequency branch in EnhancedImageDeepfakeModel (B4 only). Default: True.",
+    )
     return p.parse_args()
 
 
@@ -132,6 +146,16 @@ def main():
     wd = args.weight_decay
     num_workers = args.num_workers
 
+    # Model-dependent configuration
+    if args.model == "b4":
+        image_size = 380
+        best_ckpt_name  = "efficientnet_b4_cifake_best.pth"
+        final_ckpt_name = "efficientnet_b4_cifake_final.pth"
+    else:
+        image_size = IMAGE_SIZE   # 160
+        best_ckpt_name  = BEST_CKPT_NAME
+        final_ckpt_name = FINAL_CKPT_NAME
+
     print("=" * 65)
     print("CIFAKE RETRAINING — EfficientNet-B0 ImageDeepfakeModel")
     print("=" * 65)
@@ -143,16 +167,16 @@ def main():
     print(f"Weight decay  : {wd}")
     print(f"Num workers   : {num_workers}")
     print(f"Pretrained    : {args.pretrained}")
-    print(f"Best ckpt     : {CKPT_DIR / BEST_CKPT_NAME}")
-    print(f"Final ckpt    : {CKPT_DIR / FINAL_CKPT_NAME}")
+    print(f"Best ckpt     : {CKPT_DIR / best_ckpt_name}")
+    print(f"Final ckpt    : {CKPT_DIR / final_ckpt_name}")
     print("=" * 65)
 
     # ── 1. Datasets ────────────────────────────────────────────────────────
     train_dataset = CIFAKEDataset(
-        root=cifake_root, split="train", image_size=IMAGE_SIZE, training=True
+        root=cifake_root, split="train", image_size=image_size, training=True
     )
     val_dataset = CIFAKEDataset(
-        root=cifake_root, split="test", image_size=IMAGE_SIZE, training=False
+        root=cifake_root, split="test", image_size=image_size, training=False
     )
 
     print(f"Train distribution : {train_dataset.class_distribution()}")
@@ -176,28 +200,37 @@ def main():
     print(f"Train batches : {len(train_loader)} | Val batches : {len(val_loader)}")
 
     # ── 2. Model ───────────────────────────────────────────────────────────
-    model = ImageDeepfakeModel()
-
-    # Optionally warm-start from existing checkpoint
-    if args.pretrained and PRETRAINED_CKPT.exists():
-        print(f"\nLoading pretrained weights from: {PRETRAINED_CKPT}")
-        ckpt = torch.load(PRETRAINED_CKPT, map_location=DEVICE, weights_only=False)
-        state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
-        model.load_state_dict(state_dict, strict=False)
-        print("  Pretrained weights loaded (strict=False).")
-    elif args.pretrained:
-        print(
-            f"\nWARNING: --pretrained set but checkpoint not found at {PRETRAINED_CKPT}. "
-            "Training from ImageNet weights only."
-        )
-
-    # Freeze all backbone features except last 4 blocks (mirrors train_image_classifier.py)
-    for param in model.backbone.features[:-4].parameters():
-        param.requires_grad = False
-    for param in model.backbone.features[-4:].parameters():
-        param.requires_grad = True
-    for param in model.backbone.classifier.parameters():
-        param.requires_grad = True
+    if args.model == "b4":
+        model = EnhancedImageDeepfakeModel(use_fft_branch=args.use_fft_branch)
+        print(f"Model          : EnhancedImageDeepfakeModel (B4, fft={args.use_fft_branch})")
+        # Freeze same pattern: features[0..4] frozen, features[5..8] trainable
+        for param in model.backbone.features[:-4].parameters():
+            param.requires_grad = False
+        for param in model.backbone.features[-4:].parameters():
+            param.requires_grad = True
+        if model.fft_branch is not None:
+            for param in model.fft_branch.parameters():
+                param.requires_grad = True
+        for param in model.classifier_head.parameters():
+            param.requires_grad = True
+    else:
+        model = ImageDeepfakeModel()
+        print("Model          : ImageDeepfakeModel (B0)")
+        # Warm-start from existing checkpoint if requested
+        if args.pretrained and PRETRAINED_CKPT.exists():
+            print(f"\nLoading pretrained weights from: {PRETRAINED_CKPT}")
+            ckpt = torch.load(PRETRAINED_CKPT, map_location=DEVICE, weights_only=False)
+            state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
+            model.load_state_dict(state_dict, strict=False)
+            print("  Pretrained weights loaded (strict=False).")
+        elif args.pretrained:
+            print(f"\nWARNING: --pretrained set but checkpoint not found at {PRETRAINED_CKPT}. Training from ImageNet weights only.")
+        for param in model.backbone.features[:-4].parameters():
+            param.requires_grad = False
+        for param in model.backbone.features[-4:].parameters():
+            param.requires_grad = True
+        for param in model.backbone.classifier.parameters():
+            param.requires_grad = True
 
     model.to(DEVICE)
 
@@ -207,13 +240,19 @@ def main():
     print(f"\nClass weights — FAKE: {class_weights[0]:.4f}, REAL: {class_weights[1]:.4f}")
 
     # ── 4. Optimizer & Scheduler ──────────────────────────────────────────
-    optimizer = torch.optim.AdamW(
-        [
+    if args.model == "b4":
+        opt_param_groups = [
             {"params": model.backbone.features[-4:].parameters(), "lr": lr * 0.1},
-            {"params": model.backbone.classifier.parameters(),    "lr": lr},
-        ],
-        weight_decay=wd,
-    )
+            {"params": model.classifier_head.parameters(), "lr": lr},
+        ]
+        if model.fft_branch is not None:
+            opt_param_groups.append({"params": model.fft_branch.parameters(), "lr": lr})
+    else:
+        opt_param_groups = [
+            {"params": model.backbone.features[-4:].parameters(), "lr": lr * 0.1},
+            {"params": model.backbone.classifier.parameters(), "lr": lr},
+        ]
+    optimizer = torch.optim.AdamW(opt_param_groups, weight_decay=wd)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=epochs, eta_min=1e-6
     )
@@ -228,8 +267,8 @@ def main():
     epoch = -1
 
     CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    best_ckpt_path  = CKPT_DIR / BEST_CKPT_NAME
-    final_ckpt_path = CKPT_DIR / FINAL_CKPT_NAME
+    best_ckpt_path  = CKPT_DIR / best_ckpt_name
+    final_ckpt_path = CKPT_DIR / final_ckpt_name
 
     print("\nStarting training loop...")
     for epoch in range(epochs):
@@ -257,6 +296,7 @@ def main():
         # ── Validation phase ───────────────────────────────────────────
         model.eval()
         val_loss, val_correct, val_total = 0.0, 0, 0
+        y_true_val, y_pred_val, y_prob_val = [], [], []
         with torch.no_grad():
             for tensors, labels in val_loader:
                 tensors, labels = tensors.to(DEVICE), labels.to(DEVICE)
@@ -266,6 +306,11 @@ def main():
                 preds        = torch.argmax(outputs, dim=1)
                 val_correct += (preds == labels).sum().item()
                 val_total   += labels.size(0)
+                y_true_val.extend(labels.cpu().tolist())
+                y_pred_val.extend(preds.cpu().tolist())
+                # prob of class 1 (REAL) for AUC — standard convention
+                probs = torch.softmax(outputs, dim=1)
+                y_prob_val.extend(probs[:, 1].cpu().tolist())
 
         val_acc        = val_correct / val_total
         avg_train_loss = train_loss / len(train_loader)
@@ -277,6 +322,15 @@ def main():
             f"Val Loss: {avg_val_loss:.4f} | Val Acc: {val_acc*100:.2f}%",
             flush=True,
         )
+
+        try:
+            val_metrics = calculate_metrics(y_true_val, y_pred_val, y_prob_val)
+            print(
+                f"         F1: {val_metrics['f1_score']:.4f} | AUC: {val_metrics['roc_auc']:.4f}",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"         (metrics error: {e})", flush=True)
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
