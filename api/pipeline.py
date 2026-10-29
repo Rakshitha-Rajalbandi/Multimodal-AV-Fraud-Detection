@@ -29,21 +29,31 @@ from models.gradcam import GradCAM, overlay_heatmap_on_image
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Checkpoint paths
-# IMAGE_CHECKPOINT — EfficientNet-B0 image deepfake / AI-generation classifier.
+# ── Image model checkpoint selection ──────────────────────────────────────
 #
-# Current checkpoint  : efficientnet_b0_image_best.pth
-#   Trained on FaceAVCeleb face-swap frames (~63% val acc).
-#   May misclassify AI-generated portraits (diffusion / GAN) as REAL.
+# Available checkpoints (checkpoints/image_deepfake/):
 #
-# Improved checkpoint : efficientnet_b0_cifake_best.pth
-#   Trained on CIFAKE (120k images, Stable Diffusion vs CIFAR-10 real photos).
-#   Expected val acc ~85-92%; significantly better for AI-generated portraits.
+#   efficientnet_b0_image_best.pth
+#     Trained on FaceAVCeleb face-swap frames. Val acc ~63%.
+#     May misclassify AI-generated portraits (diffusion/GAN) as REAL.
 #
-# To switch to the CIFAKE-trained checkpoint after retraining:
-#   1. Run: python train/train_cifake.py   (see train/CIFAKE_RETRAINING.md)
-#   2. Change the line below to:
-#        IMAGE_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "image_deepfake" / "efficientnet_b0_cifake_best.pth"
-#   3. Restart the API server.
+#   efficientnet_b0_cifake_best.pth
+#     Retrained on CIFAKE (120k images, Stable Diffusion vs CIFAR-10).
+#     Expected val acc ~88-92% on AI-generated images.
+#
+#   efficientnet_b4_cifake_best.pth
+#     EfficientNet-B4 upgrade, higher accuracy.
+#     Requires IMAGE_SIZE=380 and IMAGE_MODEL_ARCH='b4'.
+#
+#   efficientnet_b4_cifake_artifact_best.pth
+#     Multi-dataset training (CIFAKE + ArtiFact), best accuracy.
+#     Requires IMAGE_SIZE=380 and IMAGE_MODEL_ARCH='b4'.
+#
+# IMAGE_MODEL_ARCH and IMAGE_SIZE MUST match the checkpoint being loaded.
+#   b0 checkpoints → IMAGE_MODEL_ARCH='b0', IMAGE_SIZE=160
+#   b4 checkpoints → IMAGE_MODEL_ARCH='b4', IMAGE_SIZE=380
+IMAGE_MODEL_ARCH = 'b0'   # 'b0' or 'b4' — must match the checkpoint below
+IMAGE_SIZE = 160           # 160 for b0, 380 for b4 — must match the checkpoint below
 IMAGE_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "image_deepfake" / "efficientnet_b0_image_best.pth"
 VIDEO_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "video_deepfake" / "efficientnet_b0_best.pth"
 AUDIO_CHECKPOINT = PROJECT_ROOT / "checkpoints" / "audio_deepfake_best.pth"
@@ -490,7 +500,9 @@ def compute_error_level_analysis(pil_img):
         ela_std = float(np.std(ela_diff))
 
         # Calibrated ELA threshold: Only flag if severe localized compression discrepancy exists (Max > 68 & Std > 11)
-        ela_anomaly = 0.75 if (ela_max > 68.0 and ela_std > 11.0) else (0.35 if (ela_max > 50.0 and ela_std > 8.0) else 0.08)
+        ela_anomaly = 0.75 if (ela_max > 68.0 and ela_std > 11.0) else \
+                      0.35 if (ela_max > 50.0 and ela_std > 8.0) else \
+                      0.15 if (ela_max < 20.0 and ela_std < 3.0) else 0.08
         return ela_anomaly, round(ela_max, 2), round(ela_std, 2)
     except Exception:
         return 0.10, 15.0, 3.0
@@ -511,8 +523,15 @@ def compute_chrominance_ycrcb_forensics(img_np):
         std_cb = float(np.std(Cb))
         std_ratio = std_cr / (std_cb + 1e-6)
 
-        # Calibrated threshold: Only flag extreme chrominance decoupling (< 0.58 or > 2.15)
-        chroma_anomaly = 0.65 if (std_ratio < 0.58 or std_ratio > 2.15) else 0.08
+        # Graduated chrominance anomaly scale
+        if std_ratio < 0.40 or std_ratio > 2.80:
+            chroma_anomaly = 0.65   # strong anomaly
+        elif std_ratio < 0.58 or std_ratio > 2.15:
+            chroma_anomaly = 0.35   # moderate anomaly
+        elif std_ratio < 0.72 or std_ratio > 1.65:
+            chroma_anomaly = 0.15   # mild anomaly
+        else:
+            chroma_anomaly = 0.08
         return chroma_anomaly, round(std_ratio, 3)
     except Exception:
         return 0.10, 1.0
@@ -540,8 +559,13 @@ def compute_fft_frequency_anomaly(gray_img):
         low_freq_power = float(np.mean(magnitude_spectrum[~mask]))
 
         ratio = high_freq_power / (low_freq_power + 1e-6)
-        # Calibrated threshold: Flag extreme periodic upsampling grid spikes (> 0.94 or < 0.20)
-        fft_anomaly_score = 0.70 if (ratio > 0.94 or ratio < 0.20) else 0.08
+        # Three-tier continuous FFT anomaly score
+        if ratio > 0.94 or ratio < 0.20:
+            fft_anomaly_score = 0.70
+        elif ratio > 0.75 or ratio < 0.35:
+            fft_anomaly_score = 0.45  # moderate anomaly — diffusion-range
+        else:
+            fft_anomaly_score = 0.08
         return fft_anomaly_score, round(ratio, 4)
     except Exception:
         return 0.10, 0.50
@@ -763,10 +787,6 @@ def analyze_image(image_path, work_dir=None):
         except Exception as e:
             print(f"Image Grad-CAM note: {e}", flush=True)
 
-    prediction = "FAKE" if fake_prob >= 0.50 else "REAL"
-    fraud_risk_percent = round(fake_prob * 100, 2)
-    risk_level = "CRITICAL" if fake_prob >= 0.75 else "HIGH" if fake_prob >= 0.50 else "MEDIUM" if fake_prob >= 0.30 else "LOW"
-
     eff_score = float(fake_prob)
 
     # Real forensics signals
@@ -774,6 +794,13 @@ def analyze_image(image_path, work_dir=None):
     chroma_anomaly, std_ratio = compute_chrominance_ycrcb_forensics(np.array(pil_img))
     gray_img = np.array(pil_img.convert('L'))
     fft_anomaly_score, fft_ratio = compute_fft_frequency_anomaly(gray_img)
+
+    # Forensic signal fusion: combine model probability with forensic anomaly scores
+    forensic_score = 0.3 * ela_anomaly_score + 0.3 * fft_anomaly_score + 0.4 * chroma_anomaly
+    combined_score = 0.7 * fake_prob + 0.3 * forensic_score
+    prediction = "FAKE" if combined_score >= 0.50 else "REAL"
+    fraud_risk_percent = round(combined_score * 100, 2)
+    risk_level = "CRITICAL" if combined_score >= 0.75 else "HIGH" if combined_score >= 0.50 else "MEDIUM" if combined_score >= 0.30 else "LOW"
 
     # Natural Language Explainable AI Rationale
     human_status_str = f"Human Face Detected ({human_info['face_count']} Face)" if has_human else "General Scene / Non-Human Image"
@@ -792,6 +819,7 @@ def analyze_image(image_path, work_dir=None):
     return {
         "media_type": "Static Image",
         "fraud_risk_score": round(fake_prob, 4),
+        "combined_score": round(combined_score, 4),
         "fraud_risk_percent": fraud_risk_percent,
         "prediction": prediction,
         "risk_level": risk_level,
@@ -828,7 +856,7 @@ def analyze_image(image_path, work_dir=None):
             "timestamp_str": "Static Image",
             "risk_percent": fraud_risk_percent,
             "description": f"Multi-Model Ensemble Anomaly ({human_status_str})"
-        }] if fake_prob >= 0.50 else []
+        }] if combined_score >= 0.50 else []
     }
 
 
