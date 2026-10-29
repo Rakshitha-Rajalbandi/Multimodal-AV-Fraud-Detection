@@ -76,6 +76,13 @@ video_transform = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
+# Image-specific transform — respects IMAGE_SIZE (160 for b0, 380 for b4)
+image_transform = transforms.Compose([
+    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
 # Global model references
 IMAGE_MODEL = None
 IMAGE_GRADCAM_ENGINE = None
@@ -98,11 +105,15 @@ def load_all_models():
 
     print("Loading High-Accuracy Deepfake Detection Models & Grad-CAM Engine...", flush=True)
 
-    # 1. Pure Single-Image Model (EfficientNet-B0)
+    # 1. Pure Single-Image Model (EfficientNet-B0 or B4, controlled by IMAGE_MODEL_ARCH)
     if IMAGE_CHECKPOINT.exists():
         try:
             from models.image_model import ImageDeepfakeModel
-            IMAGE_MODEL = ImageDeepfakeModel()
+            if IMAGE_MODEL_ARCH == 'b4':
+                from models.image_model import EnhancedImageDeepfakeModel
+                IMAGE_MODEL = EnhancedImageDeepfakeModel(use_fft_branch=True)
+            else:
+                IMAGE_MODEL = ImageDeepfakeModel()
             ckpt = torch.load(IMAGE_CHECKPOINT, map_location=DEVICE, weights_only=False)
             state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
             IMAGE_MODEL.load_state_dict(state_dict, strict=False)
@@ -706,7 +717,7 @@ def analyze_image(image_path, work_dir=None):
         try:
             fake_probs = []
             for crop in crops:
-                t = video_transform(crop).unsqueeze(0).to(DEVICE)
+                t = image_transform(crop).unsqueeze(0).to(DEVICE)
                 with torch.no_grad():
                     logits = IMAGE_MODEL(t)
                     probs = torch.softmax(logits, dim=-1)
@@ -759,7 +770,7 @@ def analyze_image(image_path, work_dir=None):
     if IMAGE_GRADCAM_ENGINE is not None:
         try:
             target_img = face_roi if (has_human and face_roi is not None) else pil_img
-            input_t = video_transform(target_img).unsqueeze(0).to(DEVICE)
+            input_t = image_transform(target_img).unsqueeze(0).to(DEVICE)
             cam_mask = IMAGE_GRADCAM_ENGINE.generate_heatmap(input_t, target_class=0)
             blended_pil, _ = overlay_heatmap_on_image(target_img, cam_mask)
 
