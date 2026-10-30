@@ -182,19 +182,22 @@ def main():
     print(f"Train distribution : {train_dataset.class_distribution()}")
     print(f"Val distribution   : {val_dataset.class_distribution()}")
 
+    # pin_memory only helps when num_workers > 0; with num_workers=0 it can
+    # cause silent deadlocks on some Kaggle/Colab GPU configurations.
+    _pin = num_workers > 0
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=_pin,
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=_pin,
     )
 
     print(f"Train batches : {len(train_loader)} | Val batches : {len(val_loader)}")
